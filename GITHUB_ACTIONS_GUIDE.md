@@ -77,13 +77,8 @@ Add each of the following secrets to your GitHub repository:
    - Value: כתובת ה-ACR מ-Terraform output
    - Example: `cleverdogweatheracr.azurecr.io`
 
-9. **ACR_USERNAME**
-   - Value: ACR admin username
-   - Get via: `az acr credential show --name <acr-name> --query username --output tsv`
-
-10. **ACR_PASSWORD**
-    - Value: ACR admin password
-    - Get via: `az acr credential show --name <acr-name> --query passwords[0].value --output tsv`
+**Note**: ACR authentication now uses managed identity exclusively.
+No username/password secrets are needed - this is more secure than admin credentials.
 
 ### Step 4: OpenWeatherMap API Key Configuration
 

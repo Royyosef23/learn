@@ -4,6 +4,165 @@
 
 This project implements a production-ready weather API service deployed on Azure Kubernetes Service (AKS) using Infrastructure as Code (Terraform) principles. The architecture follows cloud-native best practices with automated CI/CD pipelines, comprehensive testing, and cost optimization strategies.
 
+## Prerequisites and Installation Requirements
+
+### Required Software Components
+
+#### Azure CLI
+**Purpose**: Command-line interface for Azure resource management
+**Installation**: Download from https://docs.microsoft.com/en-us/cli/azure/install-azure-cli
+**Configuration**: Execute `az login` for authentication
+**Version Requirement**: Latest stable version recommended
+
+#### Terraform
+**Purpose**: Infrastructure as Code provisioning and management
+**Installation**: Download from https://learn.hashicorp.com/tutorials/terraform/install-cli
+**Version Requirement**: >= 1.0 (specified in terraform configuration)
+**Verification**: Execute `terraform --version` to confirm installation
+
+#### kubectl
+**Purpose**: Kubernetes cluster management and application deployment
+**Installation**: Download from https://kubernetes.io/docs/tasks/tools/
+**Configuration**: Automatic configuration via Azure CLI after AKS deployment
+**Version Compatibility**: Must be compatible with deployed AKS version
+
+#### Docker
+**Purpose**: Container image building and local testing capabilities
+**Installation**: Download from https://docs.docker.com/get-docker/
+**Configuration**: Ensure Docker daemon is running
+**Platform Support**: Available for Windows, macOS, and Linux
+
+## Required Manual Configuration
+
+### 1. Azure Service Principal Creation
+You must create an Azure Service Principal for GitHub Actions authentication:
+
+```bash
+az ad sp create-for-rbac --name "github-actions-sp" \
+  --role contributor \
+  --scopes /subscriptions/<your-subscription-id> \
+  --sdk-auth
+```
+
+### 2. OpenWeatherMap API Key Configuration
+**Status**: CONFIGURED - API key is already encoded and set in k8s/secret.yaml
+
+The OpenWeatherMap API key has been configured for this project:
+1. Valid API key obtained from https://openweathermap.org/api
+2. Key properly base64 encoded for Kubernetes secret
+3. Secret configured in k8s/secret.yaml
+
+**Note**: The API key is configured but not exposed in the repository for security purposes.
+
+### 3. Terraform Variables File
+Create terraform/terraform.tfvars with your specific configuration values:
+```hcl
+location = "West Europe"
+tags = {
+  Environment = "Development"
+  Project     = "WeatherAPI"
+  Owner       = "YourName"
+}
+```
+
+### 4. GitHub Repository Secrets Configuration
+Add the following secrets in GitHub repository settings:
+
+**Azure Authentication**:
+- ARM_CLIENT_ID: Service principal application ID
+- ARM_CLIENT_SECRET: Service principal password
+- ARM_SUBSCRIPTION_ID: Azure subscription identifier
+- ARM_TENANT_ID: Azure tenant identifier
+- AZURE_CREDENTIALS: Complete JSON output from service principal creation
+
+**Container Registry** (configured automatically via Terraform):
+- ACR_LOGIN_SERVER: Registry URL
+
+**Note**: ACR authentication now uses managed identity exclusively for enhanced security.
+No username/password credentials are needed or provided.
+
+**AKS Configuration** (will be available after Terraform deployment):
+- AKS_CLUSTER_NAME: Cluster name (output from Terraform)
+- AKS_RESOURCE_GROUP: Resource group name (output from Terraform)
+
+## Deployment Process
+
+### Step 1: Initial Setup and Authentication
+```bash
+# Authenticate with Azure
+az login
+
+# Set subscription context (if multiple subscriptions available)
+az account set --subscription "Your Subscription Name"
+
+# Verify authentication
+az account show
+```
+
+### Step 2: Infrastructure Deployment
+```bash
+# Navigate to terraform directory
+cd terraform
+
+# Initialize Terraform working directory
+terraform init
+
+# Validate configuration syntax
+terraform validate
+
+# Review planned infrastructure changes
+terraform plan -var-file="terraform.tfvars"
+
+# Apply infrastructure changes
+terraform apply -var-file="terraform.tfvars"
+```
+
+### Step 3: Extract Infrastructure Information
+```bash
+# Get infrastructure outputs for GitHub secrets
+terraform output aks_cluster_name
+terraform output resource_group_name
+terraform output acr_login_server
+
+# Note: ACR now uses managed identity authentication
+# No admin credentials needed - more secure than username/password
+```
+
+### Step 4: Configure Kubernetes Access
+```bash
+# Configure kubectl with AKS credentials
+az aks get-credentials --resource-group <resource-group-name> --name <cluster-name>
+
+# Verify cluster connectivity
+kubectl cluster-info
+
+# Check node status
+kubectl get nodes
+```
+
+### Step 5: Update GitHub Secrets
+Add the infrastructure outputs to GitHub repository secrets (see Required Manual Configuration section).
+
+### Step 6: Deploy Application
+Commit and push changes to trigger CI/CD pipeline:
+```bash
+git add .
+git commit -m "Deploy weather API"
+git push origin dev  # For development environment
+git push origin main # For production environment
+```
+
+### Step 7: Verify Deployment
+```bash
+# Port forward to access service locally
+kubectl port-forward service/weather-api-service 8080:80
+
+# Test deployed application
+curl "http://localhost:8080/weather/London"
+curl "http://localhost:8080/weather/Tel%20Aviv"
+curl "http://localhost:8080/health"
+```
+
 ## Technical Architecture
 
 ### Application Layer
@@ -51,9 +210,106 @@ This project implements a production-ready weather API service deployed on Azure
 - **Horizontal Pod Autoscaler**: Scales application pods based on CPU/memory utilization
 - **Resource Limits**: Prevents resource waste through defined requests and limits
 
-## Project Structure and Component Responsibilities
+### Cost Management Strategy
 
-### Root Directory Files
+#### Resource Optimization
+- Burstable VM instances adapt to workload demands
+- Autoscaling reduces costs during low usage periods
+- Basic tier services minimize operational expenses
+
+#### Budget and Alert Configuration
+**Azure Budget Setup**:
+```bash
+# Create monthly budget with alert
+az consumption budget create \
+  --budget-name "weather-api-monthly-budget" \
+  --amount 100 \
+  --category Cost \
+  --time-grain Monthly \
+  --start-date $(date +%Y-%m-01) \
+  --notifications '[{
+    "enabled": true,
+    "operator": "GreaterThan",
+    "threshold": 80,
+    "contactEmails": ["your-email@domain.com"],
+    "thresholdType": "Actual"
+  }]'
+```
+
+**Cost Monitoring Commands**:
+```bash
+# Monitor current month costs
+az consumption usage list \
+  --start-date $(date +%Y-%m-01) \
+  --end-date $(date +%Y-%m-%d) \
+  --output table
+
+# Get cost breakdown by service
+az consumption usage list \
+  --start-date $(date +%Y-%m-01) \
+  --end-date $(date +%Y-%m-%d) \
+  --include-meter-details \
+  --output json | jq '.[] | {service: .meterDetails.meterCategory, cost: .pretaxCost}'
+```
+
+#### Orphaned Resource Detection
+**Weekly Resource Audit**:
+```bash
+# List all resources in resource group
+az resource list --resource-group <resource-group-name> --output table
+
+# Check for untagged resources
+az resource list --resource-group <resource-group-name> \
+  --query "[?tags==null]" --output table
+
+# Identify resources without proper cost tracking
+az resource list --resource-group <resource-group-name> \
+  --query "[?!tags.Environment]" --output table
+```
+
+**Automated Monitoring Script** (recommended to run weekly):
+```bash
+#!/bin/bash
+# weekly-audit.sh - Resource and cost monitoring script
+
+RESOURCE_GROUP="<your-resource-group>"
+DATE=$(date +%Y-%m-%d)
+
+echo "=== Weekly Resource Audit - $DATE ==="
+
+# Check for orphaned resources
+echo "Checking for orphaned resources..."
+az resource list --resource-group $RESOURCE_GROUP --output table
+
+# Monitor this month's costs
+echo "Current month cost summary..."
+az consumption usage list \
+  --start-date $(date +%Y-%m-01) \
+  --end-date $(date +%Y-%m-%d) \
+  --output table
+
+# Check node utilization
+echo "Node utilization check..."
+kubectl top nodes
+
+# Verify autoscaler hasn't scaled unnecessarily
+echo "Recent scaling events..."
+kubectl get events --sort-by='.lastTimestamp' | grep -i scale | head -10
+```
+
+#### Monitoring and Alerting
+- Azure Cost Management budget configuration
+- Resource utilization tracking through Azure Monitor
+- Automated scaling policies based on demand metrics
+- Weekly cost reports and resource optimization recommendations
+
+#### Development vs Production
+- Shared infrastructure for development workloads
+- Environment-specific scaling configurations  
+- Cost allocation through comprehensive resource tagging
+- Separate budgets for development and production environments
+
+## Project Structure and Component Responsibilities
 
 #### app.py
 **Purpose**: Main application entry point and Flask web server
@@ -155,7 +411,8 @@ Replace the encoded value in the secret.yaml file.
 
 **Azure Container Registry**:
 - Basic tier for cost optimization
-- Admin access enabled for simplified authentication
+- **Admin access disabled** for enhanced security
+- Authentication via managed identity only
 - Integration with AKS via role assignment
 
 **Role Assignment**:
@@ -170,15 +427,7 @@ Replace the encoded value in the secret.yaml file.
 
 #### terraform.tfvars
 **Purpose**: Variable value assignments
-**Required Configuration**: You must create this file with your specific values:
-```hcl
-location = "West Europe"
-tags = {
-  Environment = "Development"
-  Project     = "WeatherAPI"
-  Owner       = "YourName"
-}
-```
+**Configuration**: This file should be created as specified in the Required Manual Configuration section above.
 
 #### outputs.tf
 **Purpose**: Terraform output value definitions
@@ -249,71 +498,7 @@ tags = {
 - Flask test client for HTTP request simulation
 - Configurable responses based on API key availability
 
-## Required Manual Configuration
-
-### 1. Azure Service Principal Creation
-You must create an Azure Service Principal for GitHub Actions authentication:
-
-```bash
-az ad sp create-for-rbac --name "github-actions-sp" \
-  --role contributor \
-  --scopes /subscriptions/<your-subscription-id> \
-  --sdk-auth
-```
-
-### 2. GitHub Repository Secrets Configuration
-Add the following secrets in GitHub repository settings:
-
-**Azure Authentication**:
-- ARM_CLIENT_ID: Service principal application ID
-- ARM_CLIENT_SECRET: Service principal password
-- ARM_SUBSCRIPTION_ID: Azure subscription identifier
-- ARM_TENANT_ID: Azure tenant identifier
-- AZURE_CREDENTIALS: Complete JSON output from service principal creation
-
-**Container Registry**:
-- ACR_LOGIN_SERVER: Registry URL (will be available after Terraform deployment)
-- ACR_USERNAME: Registry admin username
-- ACR_PASSWORD: Registry admin password
-
-**AKS Configuration**:
-- AKS_CLUSTER_NAME: Cluster name (output from Terraform)
-- AKS_RESOURCE_GROUP: Resource group name (output from Terraform)
-
-### 3. OpenWeatherMap API Key Configuration
-**Status**: CONFIGURED - API key is already encoded and set in k8s/secret.yaml
-
-The OpenWeatherMap API key has been configured for this project:
-1. Valid API key obtained from https://openweathermap.org/api
-2. Key properly base64 encoded for Kubernetes secret
-3. Secret configured in k8s/secret.yaml
-
-**Note**: The API key is configured but not exposed in the repository for security purposes.
-
-### 4. Terraform Variables File
-Create terraform/terraform.tfvars with your specific configuration values.
-
-## Deployment Process
-
-### Initial Infrastructure Deployment
-1. Configure Azure CLI authentication: `az login`
-2. Navigate to terraform directory: `cd terraform`
-3. Initialize Terraform: `terraform init`
-4. Review deployment plan: `terraform plan -var-file="terraform.tfvars"`
-5. Deploy infrastructure: `terraform apply -var-file="terraform.tfvars"`
-6. Configure kubectl with AKS credentials (output from Terraform)
-
-### Application Deployment
-1. Configure GitHub repository secrets with infrastructure outputs
-2. API key is already configured in k8s/secret.yaml
-3. Commit changes to trigger CI/CD pipeline
-4. Monitor deployment progress in GitHub Actions
-
-### Verification and Testing
-1. Port forward for local testing: `kubectl port-forward service/weather-api-service 8080:80`
-2. Test endpoints:
-   - Health check: `curl http://localhost:8080/health`
-   - Weather query: `curl "http://localhost:8080/weather/London"`
+## Alternative Deployment Methods
 
 ## Security Implementation
 
@@ -367,122 +552,6 @@ Create terraform/terraform.tfvars with your specific configuration values.
 - Shared infrastructure for development workloads
 - Environment-specific scaling configurations
 - Cost allocation through resource tagging
-
-## Prerequisites and Installation Requirements
-
-### Required Software Components
-
-#### Azure CLI
-**Purpose**: Command-line interface for Azure resource management
-**Installation**: Download from https://docs.microsoft.com/en-us/cli/azure/install-azure-cli
-**Configuration**: Execute `az login` for authentication
-**Version Requirement**: Latest stable version recommended
-
-#### Terraform
-**Purpose**: Infrastructure as Code provisioning and management
-**Installation**: Download from https://learn.hashicorp.com/tutorials/terraform/install-cli
-**Version Requirement**: >= 1.0 (specified in terraform configuration)
-**Verification**: Execute `terraform --version` to confirm installation
-
-#### kubectl
-**Purpose**: Kubernetes cluster management and application deployment
-**Installation**: Download from https://kubernetes.io/docs/tasks/tools/
-**Configuration**: Automatic configuration via Azure CLI after AKS deployment
-**Version Compatibility**: Must be compatible with deployed AKS version
-
-#### Docker
-**Purpose**: Container image building and local testing capabilities
-**Installation**: Download from https://docs.docker.com/get-docker/
-**Configuration**: Ensure Docker daemon is running
-**Platform Support**: Available for Windows, macOS, and Linux
-
-### Initial Setup Process
-
-#### Azure Authentication Configuration
-```bash
-# Authenticate with Azure
-az login
-
-# Set subscription context (if multiple subscriptions available)
-az account set --subscription "Your Subscription Name"
-
-# Verify authentication
-az account show
-```
-
-#### OpenWeatherMap API Configuration
-**Status**: CONFIGURED
-
-The OpenWeatherMap API integration is already configured:
-- Valid API key obtained and encoded
-- Kubernetes secret properly configured in k8s/secret.yaml
-- Ready for deployment without additional configuration
-
-#### Terraform Infrastructure Deployment
-```bash
-# Navigate to terraform directory
-cd terraform
-
-# Initialize Terraform working directory
-terraform init
-
-# Validate configuration syntax
-terraform validate
-
-# Review planned infrastructure changes
-terraform plan -var-file="terraform.tfvars"
-
-# Apply infrastructure changes
-terraform apply -var-file="terraform.tfvars"
-```
-
-#### Kubernetes Configuration
-```bash
-# Configure kubectl with AKS credentials
-az aks get-credentials --resource-group <resource-group-name> --name <cluster-name>
-
-# Verify cluster connectivity
-kubectl cluster-info
-
-# Check node status
-kubectl get nodes
-```
-
-### Application Deployment Options
-
-#### Option 1: Automated Deployment via PowerShell (Windows)
-```powershell
-.\deploy.ps1
-```
-
-#### Option 2: Automated Deployment via Bash (Linux/macOS/WSL)
-```bash
-chmod +x deploy.sh
-./deploy.sh
-```
-
-#### Option 3: Manual Deployment Steps
-```bash
-# Build and tag Docker image
-docker build -t weather-api .
-
-# Tag for Azure Container Registry
-docker tag weather-api <acr-name>.azurecr.io/weather-api:latest
-
-# Authenticate with ACR
-az acr login --name <acr-name>
-
-# Push image to registry
-docker push <acr-name>.azurecr.io/weather-api:latest
-
-# Deploy to Kubernetes
-kubectl apply -f k8s/secret.yaml
-kubectl apply -f k8s/deployment.yaml
-
-# Verify deployment
-kubectl get pods -l app=weather-api
-kubectl get service weather-api-service
-```
 
 ## Testing and Verification Procedures
 
@@ -666,25 +735,314 @@ kubectl describe node <node-name>
 - Adjust cluster autoscaler parameters
 - Consider vertical pod autoscaling for resource optimization
 
-## Security Best Practices Implementation
+## Production Readiness and Optimization Considerations
 
-### Container Security
+### Security Enhancements for Production
+
+#### Container Registry Security
+**Current Implementation**: ACR with admin access **DISABLED** - using managed identity only
+**Security Benefits**:
+- **No static credentials** stored in GitHub secrets
+- **Automatic credential rotation** managed by Azure
+- **Principle of least privilege** - AKS gets only ACR pull permissions
+- **Eliminates credential exposure risk** in logs or configuration files
+
+**Authentication Methods Comparison**:
+
+| Method | Security Level | Credential Management | Rotation | Recommended |
+|--------|----------------|----------------------|----------|-------------|
+| **Admin Username/Password** | LOW | Manual static secrets | Manual | NEVER |
+| **Service Principal (SPN)** | MEDIUM | Manual secret rotation | Manual | OK for CI/CD |
+| **Managed Identity** | HIGH | Automatic by Azure | Automatic | **Best Practice** |
+
+**Implementation**:
+```hcl
+# In terraform/main.tf
+resource "azurerm_container_registry" "main" {
+  admin_enabled = false  # Security: No admin access
+  # ... other configuration
+}
+
+# Role assignment for AKS managed identity
+resource "azurerm_role_assignment" "aks_acr" {
+  scope                = azurerm_container_registry.main.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id
+}
+```
+**Implementation**:
+```hcl
+# In terraform/main.tf
+resource "azurerm_container_registry" "acr" {
+  admin_enabled = false  # Change from true to false
+  # ... rest of configuration
+}
+```
+
+#### Secrets Management Evolution
+**Current Implementation**: Kubernetes secrets in YAML files
+**Production Recommendation**: Migrate to Azure Key Vault with CSI Secret Store Driver
+**Benefits**:
+- Centralized secret management
+- Automatic secret rotation capabilities
+- Enhanced audit logging
+- Integration with Azure RBAC
+
+**Implementation Steps**:
+1. Install Azure Key Vault CSI Secret Store Driver
+2. Create Azure Key Vault instance
+3. Configure SecretProviderClass for weather API key
+4. Update deployment to use mounted secrets
+
+#### Docker Image Security
+**Current Status**: Multi-stage build implemented
+**Additional Recommendations**:
+- Implement image vulnerability scanning in CI/CD pipeline
+- Use specific base image tags instead of "latest"
+- Remove development dependencies from production images
+- Implement image signing for supply chain security
+
+### Infrastructure Optimization and Monitoring
+
+#### Cost Management Strategy
+**Implement Azure Budgets**:
+```bash
+# Create budget alert for monthly spending
+az consumption budget create \
+  --budget-name "weather-api-budget" \
+  --amount 100 \
+  --time-grain Monthly \
+  --start-date 2025-01-01 \
+  --end-date 2025-12-31
+```
+
+**Resource Monitoring Commands**:
+```bash
+# List all created resources to identify orphaned resources
+az resource list --resource-group <resource-group-name> --output table
+
+# Monitor resource costs
+az consumption usage list --start-date 2025-01-01 --end-date 2025-01-31
+```
+
+#### Autoscaling Optimization
+**Current Configuration**: Cluster autoscaler (1-3 nodes)
+**Monitoring Recommendations**:
+- Track node utilization to prevent unnecessary scaling to maximum capacity
+- Monitor autoscaler events: `kubectl get events --field-selector source=cluster-autoscaler`
+- Set up alerts if cluster consistently scales to 3 nodes without justified load
+- Review scaling metrics and thresholds regularly
+
+**Cost Control for Autoscaling**:
+```bash
+# Monitor node utilization to justify scaling
+kubectl top nodes
+
+# Check autoscaler status and decisions
+kubectl describe configmap cluster-autoscaler-status -n kube-system
+
+# Review scaling events
+kubectl get events --sort-by='.lastTimestamp' | grep -i scale
+```
+
+**Implement Vertical Pod Autoscaler (VPA) for memory optimization:**
+- Configure appropriate scaling metrics and thresholds
+- Prevent memory waste through intelligent resource allocation
+
+**VPA Implementation**:
+```yaml
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: weather-api-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: weather-api
+  updatePolicy:
+    updateMode: "Auto"
+```
+
+#### Load Balancer Considerations
+**Current Implementation**: Basic Load Balancer included with AKS (no additional cost)
+**Future Enhancements**:
+- Consider Application Gateway Ingress Controller (AGIC) for advanced routing (**Additional cost**)
+- Implement NGINX Ingress for cost-effective HTTP/HTTPS termination (**Additional cost**)
+- Note: Additional ingress controllers incur extra costs beyond basic AKS Load Balancer
+
+**Cost Impact Analysis**:
+- Basic AKS Load Balancer: Included in AKS pricing
+- Application Gateway: ~$18-25/month base cost + data processing fees
+- NGINX Ingress: Compute costs for ingress controller pods only
+
+### Advanced Security Implementation
+
+#### Container Security
 - Use official base images with security updates
 - Implement non-root user execution
 - Regularly scan images for vulnerabilities
 - Minimize image size and attack surface
 
-### Kubernetes Security
+#### Kubernetes Security
 - Enable Pod Security Standards
 - Implement network policies for traffic control
 - Use service accounts with minimal required permissions
 - Regular security updates for cluster components
 
-### Azure Security
+#### Azure Security
 - Implement Azure Policy for compliance
 - Use Azure Key Vault for sensitive data management
 - Enable Azure Defender for container security
 - Regular review of access permissions and roles
+
+### Production Security Checklist
+
+#### Pre-Production Security Audit
+**Container Registry Security**:
+- [x] ACR admin access disabled (admin_enabled = false in Terraform)
+- [x] Managed identity authentication implemented exclusively
+- [ ] Enable vulnerability scanning for container images
+- [ ] Configure retention policies for cost optimization
+
+**Kubernetes Secrets Management**:
+- [ ] Migrate from YAML secrets to Azure Key Vault
+- [ ] Implement CSI Secret Store Driver for secure mounting
+- [ ] Enable automatic secret rotation capabilities
+- [ ] Remove hardcoded secrets from repository files
+
+**Network Security**:
+- [ ] Implement Kubernetes network policies for pod isolation
+- [ ] Configure Azure Firewall for production environments
+- [ ] Enable Azure DDoS Protection for public endpoints
+- [ ] Restrict ingress access to specific IP ranges
+
+**Monitoring and Compliance**:
+- [ ] Enable Azure Defender for Kubernetes threat detection
+- [ ] Configure Azure Policy for organizational compliance
+- [ ] Implement comprehensive audit logging
+- [ ] Set up security alerting and incident response
+
+### Terraform State Management and Cleanup Considerations
+
+#### Infrastructure Cleanup Best Practices
+**Standard Cleanup**:
+```bash
+# Standard terraform destroy
+terraform destroy -var-file="terraform.tfvars"
+```
+
+**Manual Resource Verification**:
+```bash
+# Verify complete resource removal
+az resource list --resource-group <resource-group-name>
+
+# Check for orphaned Network Security Groups
+az network nsg list --resource-group <resource-group-name>
+
+# Verify ACR deletion
+az acr list --resource-group <resource-group-name>
+```
+
+**Potential Cleanup Issues**:
+- Network Security Groups may persist after cluster deletion
+- Container Registry might retain images affecting costs
+- Azure Load Balancer resources could remain orphaned
+
+**Complete Cleanup Script**:
+```bash
+# Get resource group name from terraform output
+RESOURCE_GROUP=$(terraform output -raw resource_group_name)
+
+# Standard terraform destroy
+terraform destroy -var-file="terraform.tfvars" -auto-approve
+
+# Manual cleanup of potential orphaned resources
+az network nsg delete --resource-group $RESOURCE_GROUP --name <nsg-name>
+az network public-ip delete --resource-group $RESOURCE_GROUP --name <public-ip-name>
+
+# Final verification
+az resource list --resource-group $RESOURCE_GROUP --output table
+```
+
+#### Remote State Management
+**Current Setup**: Local state files
+**Production Recommendation**: Configure remote state backend
+```hcl
+# Add to terraform/main.tf
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "terraform-state-rg"
+    storage_account_name = "terraformstatestg"
+    container_name       = "tfstate"
+    key                  = "weather-api.terraform.tfstate"
+  }
+}
+```
+
+### Future Enhancement Roadmap
+
+#### DNS and HTTPS Implementation
+**Ingress Controller Setup**:
+```yaml
+# ingress.yaml - for future implementation
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: weather-api-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+  - hosts:
+    - api.yourweather.com
+    secretName: weather-api-tls
+  rules:
+  - host: api.yourweather.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: weather-api-service
+            port:
+              number: 80
+```
+
+#### Advanced Monitoring Setup
+**Azure Monitor Configuration**:
+```bash
+# Enable Container Insights
+az aks enable-addons --resource-group <resource-group> \
+  --name <cluster-name> \
+  --addons monitoring
+```
+
+**Log Analytics Workspace Integration**:
+```bash
+# Create Log Analytics workspace
+az monitor log-analytics workspace create \
+  --resource-group <resource-group> \
+  --workspace-name weather-api-logs
+```
+
+#### CI/CD Pipeline Enhancements
+**Security Scanning Addition**:
+```yaml
+# Add to .github/workflows/ci-cd.yml
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ env.ACR_LOGIN_SERVER }}/weather-api:${{ github.sha }}'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+```
 
 ## Cleanup and Resource Management
 
