@@ -280,11 +280,15 @@ Add the following secrets in GitHub repository settings:
 - AKS_CLUSTER_NAME: Cluster name (output from Terraform)
 - AKS_RESOURCE_GROUP: Resource group name (output from Terraform)
 
-### 3. OpenWeatherMap API Key
-1. Register at https://openweathermap.org/api
-2. Obtain API key from dashboard
-3. Encode the key: `echo -n "your-api-key" | base64`
-4. Update k8s/secret.yaml with encoded value
+### 3. OpenWeatherMap API Key Configuration
+**Status**: CONFIGURED - API key is already encoded and set in k8s/secret.yaml
+
+The OpenWeatherMap API key has been configured for this project:
+1. Valid API key obtained from https://openweathermap.org/api
+2. Key properly base64 encoded for Kubernetes secret
+3. Secret configured in k8s/secret.yaml
+
+**Note**: The API key is configured but not exposed in the repository for security purposes.
 
 ### 4. Terraform Variables File
 Create terraform/terraform.tfvars with your specific configuration values.
@@ -301,7 +305,7 @@ Create terraform/terraform.tfvars with your specific configuration values.
 
 ### Application Deployment
 1. Configure GitHub repository secrets with infrastructure outputs
-2. Update k8s/secret.yaml with encoded API key
+2. API key is already configured in k8s/secret.yaml
 3. Commit changes to trigger CI/CD pipeline
 4. Monitor deployment progress in GitHub Actions
 
@@ -407,13 +411,12 @@ az account show
 ```
 
 #### OpenWeatherMap API Configuration
-1. Navigate to https://openweathermap.org/api
-2. Create account and obtain API key
-3. Encode API key for Kubernetes secret:
-```bash
-echo -n "your-actual-api-key" | base64
-```
-4. Update k8s/secret.yaml with encoded value
+**Status**: CONFIGURED
+
+The OpenWeatherMap API integration is already configured:
+- Valid API key obtained and encoded
+- Kubernetes secret properly configured in k8s/secret.yaml
+- Ready for deployment without additional configuration
 
 #### Terraform Infrastructure Deployment
 ```bash

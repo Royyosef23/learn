@@ -128,7 +128,7 @@ az acr credential show --name $(terraform output -raw acr_name)
 
 5. **Commit and Push** to trigger CI/CD pipeline
 
-## 🚀 Workflow Overview
+## Workflow Overview
 
 ### 1. **CI/CD Pipeline** (`.github/workflows/ci-cd.yml`)
 - **Trigger**: Push to `main` או `dev`
@@ -143,7 +143,7 @@ az acr credential show --name $(terraform output -raw acr_name)
 - **Actions**: plan, apply, destroy
 - **Environments**: dev, prod
 
-## 📋 Git Workflow מומלץ
+## Git Workflow מומלץ
 
 ### Branch Strategy:
 ```
@@ -178,7 +178,7 @@ main (production)
    git push origin main  # Auto-deploy to production
    ```
 
-## 🎯 Environments Setup
+## Environments Setup
 
 ### GitHub Repository Settings:
 1. **Settings** → **Environments**
@@ -191,7 +191,7 @@ main (production)
    - Wait timer
    - Deployment branches: `main` only
 
-## 🔧 Local Development Commands
+## Local Development Commands
 
 ### בדיקת קוד:
 ```bash
@@ -218,7 +218,7 @@ terraform plan -var-file="terraform.tfvars"
 terraform apply -var-file="terraform.tfvars"
 ```
 
-## 📊 Monitoring & Debugging
+## Monitoring & Debugging
 
 ### GitHub Actions:
 - **Actions tab**: צפייה בריצות
@@ -240,7 +240,7 @@ kubectl get service weather-api-service
 kubectl describe service weather-api-service
 ```
 
-## 🚨 Emergency Procedures
+## Emergency Procedures
 
 ### Rollback Production:
 ```bash
@@ -261,7 +261,7 @@ terraform destroy -auto-approve
 az resource list --resource-group <rg-name>
 ```
 
-## 📈 Cost Monitoring
+## Cost Monitoring
 
 ### Azure Cost Management:
 - Budget alerts

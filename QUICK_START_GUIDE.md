@@ -8,7 +8,26 @@
 - GitHub Actions לאוטומציה
 - Kubernetes deployment על Azure
 
-## דברים שאתה חייב לעשות בעצמך (לא יכול להיות אוטומטי)
+## שגיאה נפוצה - GitHub Actions נכשל
+
+**אם אתה רואה שגיאה כמו:**
+```
+Error: Input required and not supplied: username
+```
+
+**זה אומר שעדיין לא הגדרת את ה-secrets ב-GitHub!**
+
+### דרך מהירה לעצור את הכשלונות:
+1. עבור ל-GitHub repository → Actions
+2. ב-workflow שנכשל, לחץ "Cancel workflow"
+3. **ודא שאתה משלים את כל השלבים לפני push נוסף**
+
+### סדר נכון (חשוב!):
+1. **קודם**: הרץ `terraform apply` (שלב A)
+2. **אחר כך**: הגדר את כל ה-secrets (שלב C) 
+3. **רק אז**: תעשה push שיפעיל את ה-workflow
+
+**אל תעשה push לפני שסיימת את ההגדרות!**
 
 ### 1. Azure Service Principal - חובה ראשון
 ```bash
@@ -202,12 +221,12 @@ az resource list --resource-group <rg-name>
 3. בדוק logs של ה-pods
 
 ## סיכום הדברים שאתה חייב לעשות
-1. ✅ צור Azure Service Principal
-2. ✅ קבל OpenWeatherMap API key  
-3. ✅ צור terraform.tfvars
-4. ✅ עדכן k8s/secret.yaml
-5. ✅ הרץ terraform apply
-6. ✅ הגדר GitHub secrets
-7. ✅ push לגיט כדי להפעיל deployment
+1. צור Azure Service Principal
+2. קבל OpenWeatherMap API key  
+3. צור terraform.tfvars
+4. עדכן k8s/secret.yaml
+5. הרץ terraform apply
+6. הגדר GitHub secrets
+7. push לגיט כדי להפעיל deployment
 
 זה הכל! לאחר השלבים האלה הפרויקט יעבוד אוטומטית.
