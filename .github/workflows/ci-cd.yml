@@ -78,7 +78,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    environment: production
     
     steps:
     - uses: actions/checkout@v4
@@ -116,7 +115,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/dev'
-    environment: development
     
     steps:
     - uses: actions/checkout@v4
@@ -126,8 +124,28 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
         
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials \
+          --resource-group ${{ secrets.AKS_RESOURCE_GROUP }} \
+          --name ${{ secrets.AKS_CLUSTER_NAME }}
+          
     - name: Deploy to Dev Environment
       run: |
-        # This could deploy to a separate dev cluster or namespace
-        echo "Deploying to development environment..."
-        # Add dev-specific deployment logic here
+        # Create dev namespace if it doesn't exist
+        kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Update image tag in deployment for dev
+        IMAGE_TAG="dev-${GITHUB_SHA::8}"
+        sed -i "s|image: .*|image: ${{ secrets.ACR_LOGIN_SERVER }}/${IMAGE_NAME}:${IMAGE_TAG}|" k8s/deployment.yaml
+        
+        # Apply Kubernetes manifests to dev namespace
+        kubectl apply -f k8s/secret.yaml -n dev
+        kubectl apply -f k8s/deployment.yaml -n dev
+        
+        # Wait for rollout in dev namespace
+        kubectl rollout status deployment/weather-api -n dev --timeout=300s
+        
+        # Verify deployment in dev namespace
+        kubectl get pods -l app=weather-api -n dev
+        kubectl get service weather-api-service -n dev

@@ -1,56 +1,132 @@
 # GitHub Actions Setup Guide
 
-## 🔐 Required GitHub Secrets
+## Repository Secrets Configuration
 
-### Azure Authentication
-יש להוסיף את הסודות הבאים ב-GitHub repository settings:
+**IMPORTANT**: יש להגדיר את הסודות הבאים ב-GitHub repository לפני שניתן להשתמש ב-CI/CD pipeline.
 
-1. **Azure Service Principal** (עבור Terraform):
-   ```
-   ARM_CLIENT_ID: <service-principal-app-id>
-   ARM_CLIENT_SECRET: <service-principal-password>
-   ARM_SUBSCRIPTION_ID: <azure-subscription-id>
-   ARM_TENANT_ID: <azure-tenant-id>
-   ```
+### Step 1: Navigate to Repository Settings
+1. עבור לעמוד הראשי של ה-repository ב-GitHub
+2. לחץ על "Settings" בתפריט העליון
+3. בתפריט הצדדי השמאלי, לחץ על "Secrets and variables" ← "Actions"
+4. לחץ על "New repository secret"
 
-2. **Azure Container Registry**:
-   ```
-   ACR_LOGIN_SERVER: <acr-name>.azurecr.io
-   ACR_USERNAME: <acr-admin-username>
-   ACR_PASSWORD: <acr-admin-password>
-   ```
+### Step 2: Azure Service Principal Creation
 
-3. **AKS Cluster Info**:
-   ```
-   AKS_CLUSTER_NAME: <aks-cluster-name>
-   AKS_RESOURCE_GROUP: <resource-group-name>
-   AZURE_CREDENTIALS: <service-principal-json>
-   ```
+**Prerequisites**: Azure CLI מותקן ומחובר לחשבון Azure שלך
 
-## 🏗️ Service Principal יצירת
-
-### שלב 1: יצירת Service Principal
 ```bash
 # Login to Azure
 az login
 
-# Create service principal
-az ad sp create-for-rbac --name "github-actions-sp" \
+# Get subscription ID
+az account show --query id --output tsv
+
+# Create service principal (החלף את SUBSCRIPTION_ID בערך האמיתי)
+az ad sp create-for-rbac --name "github-actions-weather-api" \
   --role contributor \
-  --scopes /subscriptions/<subscription-id> \
+  --scopes /subscriptions/SUBSCRIPTION_ID \
   --sdk-auth
 ```
 
-### שלב 2: העתקת הפלט
-השמר את הפלט JSON - זה יהיה ה-`AZURE_CREDENTIALS`:
+**Output Example**:
 ```json
 {
-  "clientId": "xxx",
-  "clientSecret": "xxx",
-  "subscriptionId": "xxx",
-  "tenantId": "xxx"
+  "clientId": "12345678-1234-1234-1234-123456789abc",
+  "clientSecret": "your-client-secret-here",
+  "subscriptionId": "87654321-4321-4321-4321-cba987654321",
+  "tenantId": "11111111-2222-3333-4444-555555555555"
 }
 ```
+
+### Step 3: Required Repository Secrets
+
+Add each of the following secrets to your GitHub repository:
+
+#### Azure Authentication Secrets
+1. **ARM_CLIENT_ID**
+   - Value: `clientId` from service principal output
+   - Example: `12345678-1234-1234-1234-123456789abc`
+
+2. **ARM_CLIENT_SECRET**
+   - Value: `clientSecret` from service principal output
+   - Example: `your-client-secret-here`
+
+3. **ARM_SUBSCRIPTION_ID**
+   - Value: `subscriptionId` from service principal output
+   - Example: `87654321-4321-4321-4321-cba987654321`
+
+4. **ARM_TENANT_ID**
+   - Value: `tenantId` from service principal output
+   - Example: `11111111-2222-3333-4444-555555555555`
+
+5. **AZURE_CREDENTIALS**
+   - Value: הוע JSON המלא מיצירת service principal
+   - Example: `{"clientId":"12345...","clientSecret":"your-secret...","subscriptionId":"87654...","tenantId":"11111..."}`
+
+#### Infrastructure Secrets (יהיו זמינים לאחר הרצת Terraform)
+6. **AKS_CLUSTER_NAME**
+   - Value: שם הקלאסטר מ-Terraform output
+   - Example: `clever-dog-weather-aks`
+
+7. **AKS_RESOURCE_GROUP**
+   - Value: שם ה-resource group מ-Terraform output
+   - Example: `clever-dog-ROY_API_RG`
+
+#### Container Registry Secrets (יהיו זמינים לאחר הרצת Terraform)
+8. **ACR_LOGIN_SERVER**
+   - Value: כתובת ה-ACR מ-Terraform output
+   - Example: `cleverdogweatheracr.azurecr.io`
+
+9. **ACR_USERNAME**
+   - Value: ACR admin username
+   - Get via: `az acr credential show --name <acr-name> --query username --output tsv`
+
+10. **ACR_PASSWORD**
+    - Value: ACR admin password
+    - Get via: `az acr credential show --name <acr-name> --query passwords[0].value --output tsv`
+
+### Step 4: OpenWeatherMap API Key Configuration
+
+1. הירשם ב-https://openweathermap.org/api
+2. קבל API key חינמי
+3. צור base64 encoding של המפתח:
+```bash
+echo -n "your-openweathermap-api-key" | base64
+```
+4. עדכן את `k8s/secret.yaml` עם הערך המקודד
+
+### Step 5: Deployment Order
+
+**Important**: יש לפעול בסדר הבא:
+
+1. **Infrastructure Deployment** (manual via Terraform):
+```bash
+cd terraform
+terraform init
+terraform plan -var-file="terraform.tfvars"
+terraform apply -var-file="terraform.tfvars"
+```
+
+2. **Extract Infrastructure Values**:
+```bash
+# Get AKS cluster name
+terraform output aks_cluster_name
+
+# Get resource group name
+terraform output resource_group_name
+
+# Get ACR login server
+terraform output acr_login_server
+
+# Get ACR credentials
+az acr credential show --name $(terraform output -raw acr_name)
+```
+
+3. **Configure Repository Secrets** with the extracted values
+
+4. **Update k8s/secret.yaml** with encoded API key
+
+5. **Commit and Push** to trigger CI/CD pipeline
 
 ## 🚀 Workflow Overview
 
